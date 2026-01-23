@@ -10,7 +10,7 @@ use std::process;
 use analyzer::{PacketAnalyzer, SecurityAlert};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use packet::Packet;
+use packet::{IcmpHeader, Packet};
 
 use error::{PacketError, Result};
 

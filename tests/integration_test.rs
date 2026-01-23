@@ -336,6 +336,203 @@ fn test_payload_extraction() {
     assert_eq!(&parsed.payload, payload_data);
 }
 
+#[test]
+fn test_icmp_echo_request_packet() {
+    let mut packet = vec![0u8; 34];
+
+    packet[0..6].copy_from_slice(&[0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+    packet[6..12].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    packet[12] = 0x08;
+    packet[13] = 0x00;
+
+    packet[14] = 0x45;
+    packet[15] = 0x00;
+    packet[16] = 0x00;
+    packet[17] = 0x1C;
+    packet[18..20].copy_from_slice(&[0x00, 0x01]);
+    packet[20..22].copy_from_slice(&[0x40, 0x00]);
+    packet[23] = 64;
+    packet[24] = 0x01;
+    packet[26..30].copy_from_slice(&[192, 168, 1, 100]);
+    packet[30..34].copy_from_slice(&[192, 168, 1, 200]);
+
+    let parsed = packet_inspect_safe::packet::Packet::parse(&packet).unwrap();
+
+    assert!(parsed.ip.is_some());
+    assert!(parsed.icmp.is_some());
+    assert!(parsed.tcp.is_none());
+    assert!(parsed.udp.is_none());
+
+    let icmp = parsed.icmp.unwrap();
+    assert_eq!(icmp.icmp_type, 0);
+    assert_eq!(icmp.code, 0);
+}
+
+#[test]
+fn test_icmp_echo_request_with_data() {
+    let mut packet = vec![0u8; 42];
+
+    packet[0..6].copy_from_slice(&[0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+    packet[6..12].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    packet[12] = 0x08;
+    packet[13] = 0x00;
+
+    packet[14] = 0x45;
+    packet[15] = 0x00;
+    packet[16] = 0x00;
+    packet[17] = 0x24;
+    packet[18..20].copy_from_slice(&[0x00, 0x01]);
+    packet[20..22].copy_from_slice(&[0x40, 0x00]);
+    packet[23] = 64;
+    packet[24] = 0x01;
+    packet[26..30].copy_from_slice(&[10, 0, 0, 1]);
+    packet[30..34].copy_from_slice(&[10, 0, 0, 2]);
+
+    packet[34] = 0x08;
+    packet[35] = 0x00;
+    packet[36] = 0xAF;
+    packet[37] = 0x47;
+    packet[38] = 0x00;
+    packet[39] = 0x01;
+    packet[40] = 0x00;
+    packet[41] = 0x05;
+
+    let parsed = packet_inspect_safe::packet::Packet::parse(&packet).unwrap();
+
+    assert!(parsed.icmp.is_some());
+    let icmp = parsed.icmp.unwrap();
+    assert_eq!(icmp.icmp_type, 8);
+    assert_eq!(icmp.code, 0);
+
+    if let packet_inspect_safe::packet::IcmpRest::Echo { identifier, sequence_number } = icmp.rest {
+        assert_eq!(identifier, 1);
+        assert_eq!(sequence_number, 5);
+    } else {
+        panic!("Expected Echo variant");
+    }
+}
+
+#[test]
+fn test_icmp_time_exceeded() {
+    let mut packet = vec![0u8; 34];
+
+    packet[0..6].copy_from_slice(&[0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+    packet[6..12].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    packet[12] = 0x08;
+    packet[13] = 0x00;
+
+    packet[14] = 0x45;
+    packet[15] = 0x00;
+    packet[16] = 0x00;
+    packet[17] = 0x1C;
+    packet[18..20].copy_from_slice(&[0x00, 0x01]);
+    packet[20..22].copy_from_slice(&[0x40, 0x00]);
+    packet[23] = 1;
+    packet[24] = 0x01;
+    packet[26..30].copy_from_slice(&[192, 168, 1, 1]);
+    packet[30..34].copy_from_slice(&[192, 168, 1, 2]);
+
+    packet[34] = 0x0B;
+    packet[35] = 0x00;
+
+    let parsed = packet_inspect_safe::packet::Packet::parse(&packet).unwrap();
+
+    let icmp = parsed.icmp.unwrap();
+    assert_eq!(icmp.icmp_type, 11);
+    assert_eq!(icmp.type_name(), "Time Exceeded");
+}
+
+#[test]
+fn test_icmp_destination_unreachable() {
+    let mut packet = vec![0u8; 34];
+
+    packet[0..6].copy_from_slice(&[0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+    packet[6..12].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    packet[12] = 0x08;
+    packet[13] = 0x00;
+
+    packet[14] = 0x45;
+    packet[15] = 0x00;
+    packet[16] = 0x00;
+    packet[17] = 0x1C;
+    packet[18..20].copy_from_slice(&[0x00, 0x01]);
+    packet[20..22].copy_from_slice(&[0x40, 0x00]);
+    packet[23] = 64;
+    packet[24] = 0x01;
+    packet[26..30].copy_from_slice(&[172, 16, 0, 1]);
+    packet[30..34].copy_from_slice(&[172, 16, 0, 2]);
+
+    packet[34] = 0x03;
+    packet[35] = 0x03;
+
+    let parsed = packet_inspect_safe::packet::Packet::parse(&packet).unwrap();
+
+    let icmp = parsed.icmp.unwrap();
+    assert_eq!(icmp.icmp_type, 3);
+    assert_eq!(icmp.code, 3);
+    assert_eq!(icmp.type_name(), "Destination Unreachable");
+}
+
+#[test]
+fn test_analyzer_with_icmp_packets() {
+    let mut analyzer = packet_inspect_safe::analyzer::PacketAnalyzer::new();
+
+    let mut packet = vec![0u8; 34];
+    packet[0..6].copy_from_slice(&[0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+    packet[6..12].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    packet[12] = 0x08;
+    packet[13] = 0x00;
+    packet[14] = 0x45;
+    packet[15] = 0x00;
+    packet[16] = 0x00;
+    packet[17] = 0x1C;
+    packet[18..20].copy_from_slice(&[0x00, 0x01]);
+    packet[20..22].copy_from_slice(&[0x40, 0x00]);
+    packet[23] = 64;
+    packet[24] = 0x01;
+    packet[26..30].copy_from_slice(&[192, 168, 1, 100]);
+    packet[30..34].copy_from_slice(&[192, 168, 1, 200]);
+    packet[34] = 0x08;
+
+    let parsed = packet_inspect_safe::packet::Packet::parse(&packet).unwrap();
+    analyzer.analyze_packet(&parsed).unwrap();
+    analyzer.finalize_statistics();
+
+    assert_eq!(analyzer.statistics.total_packets, 1);
+    assert_eq!(analyzer.statistics.ip_stats.icmp_packets, 1);
+}
+
+#[test]
+fn test_icmp_display_format() {
+    let mut packet = vec![0u8; 34];
+
+    packet[0..6].copy_from_slice(&[0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+    packet[6..12].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    packet[12] = 0x08;
+    packet[13] = 0x00;
+
+    packet[14] = 0x45;
+    packet[15] = 0x00;
+    packet[16] = 0x00;
+    packet[17] = 0x1C;
+    packet[18..20].copy_from_slice(&[0x00, 0x01]);
+    packet[20..22].copy_from_slice(&[0x40, 0x00]);
+    packet[23] = 64;
+    packet[24] = 0x01;
+    packet[26..30].copy_from_slice(&[192, 168, 1, 100]);
+    packet[30..34].copy_from_slice(&[192, 168, 1, 200]);
+
+    packet[34] = 0x00;
+    packet[35] = 0x00;
+
+    let parsed = packet_inspect_safe::packet::Packet::parse(&packet).unwrap();
+    let display = format!("{}", parsed);
+
+    assert!(display.contains("ICMP Header"));
+    assert!(display.contains("Echo Reply"));
+    assert!(display.contains("Type:"));
+}
+
 mod hex {
     pub fn decode(hex_str: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
         let hex_str = hex_str.replace(" ", "").replace(":", "").replace("-", "");

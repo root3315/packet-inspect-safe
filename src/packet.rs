@@ -367,6 +367,261 @@ impl UdpHeader {
     }
 }
 
+/// ICMP header structure
+#[derive(Debug, Clone, PartialEq)]
+pub struct IcmpHeader {
+    pub icmp_type: u8,
+    pub code: u8,
+    pub checksum: u16,
+    pub rest: IcmpRest,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IcmpRest {
+    Echo {
+        identifier: u16,
+        sequence_number: u16,
+    },
+    DestinationUnreachable {
+        unused: u32,
+    },
+    TimeExceeded {
+        unused: u32,
+    },
+    ParameterProblem {
+        pointer: u8,
+        unused: u8,
+        length: u16,
+    },
+    SourceQuench {
+        unused: u32,
+    },
+    Redirect {
+        gateway_address: [u8; 4],
+    },
+    Timestamp {
+        identifier: u16,
+        sequence_number: u16,
+        originate_timestamp: u32,
+        receive_timestamp: u32,
+        transmit_timestamp: u32,
+    },
+    AddressMaskRequest {
+        identifier: u16,
+        sequence_number: u16,
+        address_mask: [u8; 4],
+    },
+    RouterAdvertisement {
+        num_addresses: u8,
+        address_entry_size: u8,
+        lifetime: u16,
+    },
+    RouterSolicitation {
+        reserved: u32,
+    },
+    Unknown {
+        data: [u8; 4],
+    },
+}
+
+impl IcmpHeader {
+    pub const HEADER_SIZE: usize = 8;
+    pub const ECHO_REPLY: u8 = 0;
+    pub const DESTINATION_UNREACHABLE: u8 = 3;
+    pub const SOURCE_QUENCH: u8 = 4;
+    pub const REDIRECT: u8 = 5;
+    pub const ECHO_REQUEST: u8 = 8;
+    pub const ROUTER_ADVERTISEMENT: u8 = 9;
+    pub const ROUTER_SOLICITATION: u8 = 10;
+    pub const TIME_EXCEEDED: u8 = 11;
+    pub const PARAMETER_PROBLEM: u8 = 12;
+    pub const TIMESTAMP_REQUEST: u8 = 13;
+    pub const TIMESTAMP_REPLY: u8 = 14;
+    pub const ADDRESS_MASK_REQUEST: u8 = 17;
+    pub const ADDRESS_MASK_REPLY: u8 = 18;
+
+    pub fn parse(data: &[u8]) -> Result<Self> {
+        if data.len() < Self::HEADER_SIZE {
+            return Err(PacketError::InsufficientData {
+                expected: Self::HEADER_SIZE,
+                actual: data.len(),
+            });
+        }
+
+        let mut cursor = Cursor::new(data);
+        let icmp_type = cursor.read_u8().map_err(|e| PacketError::ParseError {
+            message: format!("Failed to read ICMP type: {}", e),
+        })?;
+        let code = cursor.read_u8().map_err(|e| PacketError::ParseError {
+            message: format!("Failed to read ICMP code: {}", e),
+        })?;
+        let checksum = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+            message: format!("Failed to read ICMP checksum: {}", e),
+        })?;
+
+        let rest = match icmp_type {
+            Self::ECHO_REPLY | Self::ECHO_REQUEST => {
+                let identifier = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP identifier: {}", e),
+                })?;
+                let sequence_number = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP sequence number: {}", e),
+                })?;
+                IcmpRest::Echo {
+                    identifier,
+                    sequence_number,
+                }
+            }
+            Self::DESTINATION_UNREACHABLE | Self::SOURCE_QUENCH | Self::TIME_EXCEEDED => {
+                let unused = cursor.read_u32::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP unused field: {}", e),
+                })?;
+                IcmpRest::DestinationUnreachable { unused }
+            }
+            Self::PARAMETER_PROBLEM => {
+                let pointer = cursor.read_u8().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP pointer: {}", e),
+                })?;
+                let unused = cursor.read_u8().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP unused byte: {}", e),
+                })?;
+                let length = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP length: {}", e),
+                })?;
+                IcmpRest::ParameterProblem {
+                    pointer,
+                    unused,
+                    length,
+                }
+            }
+            Self::REDIRECT => {
+                let mut gateway_address = [0u8; 4];
+                cursor.read_exact(&mut gateway_address).map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP gateway address: {}", e),
+                })?;
+                IcmpRest::Redirect { gateway_address }
+            }
+            Self::TIMESTAMP_REQUEST | Self::TIMESTAMP_REPLY => {
+                let identifier = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP identifier: {}", e),
+                })?;
+                let sequence_number = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP sequence number: {}", e),
+                })?;
+                let originate_timestamp = cursor.read_u32::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP originate timestamp: {}", e),
+                })?;
+                let receive_timestamp = cursor.read_u32::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP receive timestamp: {}", e),
+                })?;
+                let transmit_timestamp = cursor.read_u32::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP transmit timestamp: {}", e),
+                })?;
+                IcmpRest::Timestamp {
+                    identifier,
+                    sequence_number,
+                    originate_timestamp,
+                    receive_timestamp,
+                    transmit_timestamp,
+                }
+            }
+            Self::ADDRESS_MASK_REQUEST | Self::ADDRESS_MASK_REPLY => {
+                let identifier = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP identifier: {}", e),
+                })?;
+                let sequence_number = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP sequence number: {}", e),
+                })?;
+                let mut address_mask = [0u8; 4];
+                cursor.read_exact(&mut address_mask).map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP address mask: {}", e),
+                })?;
+                IcmpRest::AddressMaskRequest {
+                    identifier,
+                    sequence_number,
+                    address_mask,
+                }
+            }
+            Self::ROUTER_ADVERTISEMENT => {
+                let num_addresses = cursor.read_u8().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP num addresses: {}", e),
+                })?;
+                let address_entry_size = cursor.read_u8().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP address entry size: {}", e),
+                })?;
+                let lifetime = cursor.read_u16::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP lifetime: {}", e),
+                })?;
+                IcmpRest::RouterAdvertisement {
+                    num_addresses,
+                    address_entry_size,
+                    lifetime,
+                }
+            }
+            Self::ROUTER_SOLICITATION => {
+                let reserved = cursor.read_u32::<BigEndian>().map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP reserved: {}", e),
+                })?;
+                IcmpRest::RouterSolicitation { reserved }
+            }
+            _ => {
+                let mut data = [0u8; 4];
+                cursor.read_exact(&mut data).map_err(|e| PacketError::ParseError {
+                    message: format!("Failed to read ICMP rest data: {}", e),
+                })?;
+                IcmpRest::Unknown { data }
+            }
+        };
+
+        Ok(IcmpHeader {
+            icmp_type,
+            code,
+            checksum,
+            rest,
+        })
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self.icmp_type {
+            Self::ECHO_REPLY => "Echo Reply",
+            Self::DESTINATION_UNREACHABLE => "Destination Unreachable",
+            Self::SOURCE_QUENCH => "Source Quench",
+            Self::REDIRECT => "Redirect",
+            Self::ECHO_REQUEST => "Echo Request",
+            Self::ROUTER_ADVERTISEMENT => "Router Advertisement",
+            Self::ROUTER_SOLICITATION => "Router Solicitation",
+            Self::TIME_EXCEEDED => "Time Exceeded",
+            Self::PARAMETER_PROBLEM => "Parameter Problem",
+            Self::TIMESTAMP_REQUEST => "Timestamp Request",
+            Self::TIMESTAMP_REPLY => "Timestamp Reply",
+            Self::ADDRESS_MASK_REQUEST => "Address Mask Request",
+            Self::ADDRESS_MASK_REPLY => "Address Mask Reply",
+            _ => "Unknown",
+        }
+    }
+
+    pub fn verify_checksum(&self, data: &[u8]) -> bool {
+        if data.len() < Self::HEADER_SIZE {
+            return false;
+        }
+
+        let mut sum: u32 = 0;
+        for i in (0..data.len()).step_by(2) {
+            if i + 1 < data.len() {
+                sum += ((data[i] as u32) << 8) | (data[i + 1] as u32);
+            } else {
+                sum += (data[i] as u32) << 8;
+            }
+        }
+
+        while sum > 0xFFFF {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+
+        !((sum ^ 0xFFFF) as u16 != 0 && self.checksum != 0)
+    }
+}
+
 /// Represents a fully parsed packet with all headers
 #[derive(Debug, Clone, PartialEq)]
 pub struct Packet {
@@ -374,6 +629,7 @@ pub struct Packet {
     pub ip: Option<IpHeader>,
     pub tcp: Option<TcpHeader>,
     pub udp: Option<UdpHeader>,
+    pub icmp: Option<IcmpHeader>,
     pub payload: Vec<u8>,
     pub raw_data: Vec<u8>,
 }
@@ -391,6 +647,7 @@ impl Packet {
         let mut ip: Option<IpHeader> = None;
         let mut tcp: Option<TcpHeader> = None;
         let mut udp: Option<UdpHeader> = None;
+        let mut icmp: Option<IcmpHeader> = None;
         let mut payload: Vec<u8> = Vec::new();
 
         if ethernet.ether_type == EthernetHeader::IPV4_ETHER_TYPE {
@@ -426,6 +683,17 @@ impl Packet {
                                 }
                             }
                         }
+                        IpHeader::ICMP_PROTOCOL => {
+                            if data.len() > transport_start {
+                                icmp = Some(IcmpHeader::parse(&data[transport_start..])?);
+                                if let Some(ref icmp_header) = icmp {
+                                    let payload_start = transport_start + IcmpHeader::HEADER_SIZE;
+                                    if data.len() > payload_start {
+                                        payload = data[payload_start..].to_vec();
+                                    }
+                                }
+                            }
+                        }
                         _ => {
                             if data.len() > transport_start {
                                 payload = data[transport_start..].to_vec();
@@ -443,6 +711,7 @@ impl Packet {
             ip,
             tcp,
             udp,
+            icmp,
             payload,
             raw_data: data.to_vec(),
         })
@@ -496,6 +765,59 @@ impl fmt::Display for Packet {
             writeln!(f, "  Source Port:      {}", udp.source_port)?;
             writeln!(f, "  Destination Port: {}", udp.destination_port)?;
             writeln!(f, "  Length:           {}", udp.length)?;
+        }
+
+        if let Some(ref icmp) = self.icmp {
+            writeln!(f, "\nICMP Header:")?;
+            writeln!(f, "  Type:             {} ({})", icmp.icmp_type, icmp.type_name())?;
+            writeln!(f, "  Code:             {}", icmp.code)?;
+            writeln!(f, "  Checksum:         0x{:04x}", icmp.checksum)?;
+            match &icmp.rest {
+                IcmpRest::Echo { identifier, sequence_number } => {
+                    writeln!(f, "  Identifier:       {}", identifier)?;
+                    writeln!(f, "  Sequence Number:  {}", sequence_number)?;
+                }
+                IcmpRest::DestinationUnreachable { unused } => {
+                    writeln!(f, "  Unused:           {}", unused)?;
+                }
+                IcmpRest::TimeExceeded { unused } => {
+                    writeln!(f, "  Unused:           {}", unused)?;
+                }
+                IcmpRest::ParameterProblem { pointer, unused, length } => {
+                    writeln!(f, "  Pointer:          {}", pointer)?;
+                    writeln!(f, "  Unused:           {}", unused)?;
+                    writeln!(f, "  Length:           {}", length)?;
+                }
+                IcmpRest::SourceQuench { unused } => {
+                    writeln!(f, "  Unused:           {}", unused)?;
+                }
+                IcmpRest::Redirect { gateway_address } => {
+                    writeln!(f, "  Gateway Address:  {}", IpHeader::ip_to_string(gateway_address))?;
+                }
+                IcmpRest::Timestamp { identifier, sequence_number, originate_timestamp, receive_timestamp, transmit_timestamp } => {
+                    writeln!(f, "  Identifier:       {}", identifier)?;
+                    writeln!(f, "  Sequence Number:  {}", sequence_number)?;
+                    writeln!(f, "  Originate TS:     {}", originate_timestamp)?;
+                    writeln!(f, "  Receive TS:       {}", receive_timestamp)?;
+                    writeln!(f, "  Transmit TS:      {}", transmit_timestamp)?;
+                }
+                IcmpRest::AddressMaskRequest { identifier, sequence_number, address_mask } => {
+                    writeln!(f, "  Identifier:       {}", identifier)?;
+                    writeln!(f, "  Sequence Number:  {}", sequence_number)?;
+                    writeln!(f, "  Address Mask:     {}", IpHeader::ip_to_string(address_mask))?;
+                }
+                IcmpRest::RouterAdvertisement { num_addresses, address_entry_size, lifetime } => {
+                    writeln!(f, "  Num Addresses:    {}", num_addresses)?;
+                    writeln!(f, "  Entry Size:       {}", address_entry_size)?;
+                    writeln!(f, "  Lifetime:         {}", lifetime)?;
+                }
+                IcmpRest::RouterSolicitation { reserved } => {
+                    writeln!(f, "  Reserved:         {}", reserved)?;
+                }
+                IcmpRest::Unknown { data } => {
+                    writeln!(f, "  Data:             {:02x?}", data)?;
+                }
+            }
         }
 
         writeln!(f, "\nPayload: {} bytes", self.payload_size())?;
@@ -585,5 +907,130 @@ mod tests {
         let flags = header.flag_string();
         assert!(flags.contains("SYN"));
         assert!(flags.contains("ACK"));
+    }
+
+    #[test]
+    fn test_icmp_echo_request_parse() {
+        let mut data = vec![0u8; 8];
+        data[0] = 0x08;
+        data[1] = 0x00;
+        data[2] = 0xB5;
+        data[3] = 0x53;
+        data[4] = 0x00;
+        data[5] = 0x01;
+        data[6] = 0x00;
+        data[7] = 0x01;
+
+        let header = IcmpHeader::parse(&data).unwrap();
+        assert_eq!(header.icmp_type, IcmpHeader::ECHO_REQUEST);
+        assert_eq!(header.code, 0);
+        assert_eq!(header.checksum, 0xB553);
+        if let IcmpRest::Echo { identifier, sequence_number } = header.rest {
+            assert_eq!(identifier, 1);
+            assert_eq!(sequence_number, 1);
+        } else {
+            panic!("Expected Echo variant");
+        }
+    }
+
+    #[test]
+    fn test_icmp_echo_reply_parse() {
+        let mut data = vec![0u8; 8];
+        data[0] = 0x00;
+        data[1] = 0x00;
+        data[2] = 0xB5;
+        data[3] = 0x53;
+        data[4] = 0x00;
+        data[5] = 0x01;
+        data[6] = 0x00;
+        data[7] = 0x01;
+
+        let header = IcmpHeader::parse(&data).unwrap();
+        assert_eq!(header.icmp_type, IcmpHeader::ECHO_REPLY);
+        if let IcmpRest::Echo { identifier, sequence_number } = header.rest {
+            assert_eq!(identifier, 1);
+            assert_eq!(sequence_number, 1);
+        } else {
+            panic!("Expected Echo variant");
+        }
+    }
+
+    #[test]
+    fn test_icmp_destination_unreachable_parse() {
+        let mut data = vec![0u8; 8];
+        data[0] = 0x03;
+        data[1] = 0x01;
+        data[2] = 0x00;
+        data[3] = 0x00;
+        data[4] = 0x00;
+        data[5] = 0x00;
+        data[6] = 0x00;
+        data[7] = 0x00;
+
+        let header = IcmpHeader::parse(&data).unwrap();
+        assert_eq!(header.icmp_type, IcmpHeader::DESTINATION_UNREACHABLE);
+        assert_eq!(header.code, 1);
+    }
+
+    #[test]
+    fn test_icmp_time_exceeded_parse() {
+        let mut data = vec![0u8; 8];
+        data[0] = 0x0B;
+        data[1] = 0x00;
+        data[2] = 0x00;
+        data[3] = 0x00;
+        data[4] = 0x00;
+        data[5] = 0x00;
+        data[6] = 0x00;
+        data[7] = 0x00;
+
+        let header = IcmpHeader::parse(&data).unwrap();
+        assert_eq!(header.icmp_type, IcmpHeader::TIME_EXCEEDED);
+        assert_eq!(header.type_name(), "Time Exceeded");
+    }
+
+    #[test]
+    fn test_icmp_insufficient_data() {
+        let data = vec![0u8; 4];
+        let result = IcmpHeader::parse(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_icmp_type_name() {
+        let mut data = vec![0u8; 8];
+        data[0] = 0x08;
+        let header = IcmpHeader::parse(&data).unwrap();
+        assert_eq!(header.type_name(), "Echo Request");
+    }
+
+    #[test]
+    fn test_packet_with_icmp() {
+        let mut packet = vec![0u8; 34];
+
+        packet[0..6].copy_from_slice(&[0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+        packet[6..12].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        packet[12] = 0x08;
+        packet[13] = 0x00;
+
+        packet[14] = 0x45;
+        packet[15] = 0x00;
+        packet[16] = 0x00;
+        packet[17] = 0x1C;
+        packet[18..20].copy_from_slice(&[0x00, 0x01]);
+        packet[20..22].copy_from_slice(&[0x40, 0x00]);
+        packet[23] = 64;
+        packet[24] = 0x01;
+        packet[26..30].copy_from_slice(&[192, 168, 1, 100]);
+        packet[30..34].copy_from_slice(&[192, 168, 1, 200]);
+
+        let parsed = Packet::parse(&packet).unwrap();
+        assert!(parsed.ip.is_some());
+        assert!(parsed.icmp.is_some());
+        assert!(parsed.tcp.is_none());
+        assert!(parsed.udp.is_none());
+
+        let icmp = parsed.icmp.unwrap();
+        assert_eq!(icmp.icmp_type, 0);
     }
 }

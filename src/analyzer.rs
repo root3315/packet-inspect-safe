@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
-use crate::packet::{EthernetHeader, IpHeader, Packet, TcpHeader, UdpHeader};
+use crate::packet::{EthernetHeader, IcmpHeader, IcmpRest, IpHeader, Packet, TcpHeader, UdpHeader};
 
 /// Statistics collected from packet analysis
 #[derive(Debug, Clone, Default)]
@@ -145,6 +145,9 @@ pub struct PacketAnalyzer {
     pub suspicious_ips: HashSet<String>,
     syn_counts: HashMap<String, usize>,
     port_scan_tracker: HashMap<String, HashSet<u16>>,
+    icmp_echo_tracker: HashMap<String, usize>,
+    icmp_unreachable_tracker: HashMap<String, usize>,
+    icmp_time_exceeded_count: usize,
 }
 
 impl PacketAnalyzer {
@@ -156,6 +159,9 @@ impl PacketAnalyzer {
             suspicious_ips: HashSet::new(),
             syn_counts: HashMap::new(),
             port_scan_tracker: HashMap::new(),
+            icmp_echo_tracker: HashMap::new(),
+            icmp_unreachable_tracker: HashMap::new(),
+            icmp_time_exceeded_count: 0,
         }
     }
 
@@ -174,6 +180,10 @@ impl PacketAnalyzer {
 
             if let Some(ref udp) = packet.udp {
                 self.analyze_udp(udp, ip);
+            }
+
+            if let Some(ref icmp) = packet.icmp {
+                self.analyze_icmp(icmp, ip);
             }
         }
 
@@ -282,6 +292,42 @@ impl PacketAnalyzer {
         *self.statistics.udp_stats.port_counts.entry(udp.destination_port).or_insert(0) += 1;
 
         self.update_flow(ip, udp.source_port, udp.destination_port, IpHeader::UDP_PROTOCOL, 0);
+    }
+
+    fn analyze_icmp(&mut self, icmp: &IcmpHeader, ip: &IpHeader) {
+        let src_ip = IpHeader::ip_to_string(&ip.source_ip);
+        let dst_ip = IpHeader::ip_to_string(&ip.destination_ip);
+
+        match icmp.icmp_type {
+            IcmpHeader::ECHO_REQUEST | IcmpHeader::ECHO_REPLY => {
+                if let IcmpRest::Echo { identifier, sequence_number } = &icmp.rest {
+                    self.icmp_echo_tracker
+                        .entry(src_ip.clone())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+
+                    if *self.icmp_echo_tracker.get(&src_ip).unwrap_or(&0) > 100 {
+                        self.create_alert(
+                            AlertSeverity::Medium,
+                            AlertType::SuspiciousPort,
+                            format!("High rate of ICMP Echo from {}", src_ip),
+                            src_ip.clone(),
+                            dst_ip.clone(),
+                        );
+                    }
+                }
+            }
+            IcmpHeader::DESTINATION_UNREACHABLE => {
+                self.icmp_unreachable_tracker
+                    .entry(dst_ip.clone())
+                    .and_modify(|count| *count += 1)
+                    .or_insert(1);
+            }
+            IcmpHeader::TIME_EXCEEDED => {
+                self.icmp_time_exceeded_count += 1;
+            }
+            _ => {}
+        }
     }
 
     fn analyze_payload(&mut self, payload: &[u8]) {
