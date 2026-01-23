@@ -1,0 +1,32 @@
+[package]
+name = "packet-inspect-safe"
+version = "0.1.0"
+edition = "2021"
+authors = ["Packet Inspect Team"]
+description = "A memory-safe network packet analyzer written in Rust"
+license = "MIT"
+repository = "https://github.com/example/packet-inspect-safe"
+keywords = ["network", "packet", "analyzer", "rust", "memory-safe"]
+categories = ["network-programming", "command-line-utilities"]
+
+[dependencies]
+byteorder = "1.5"
+chrono = "0.4"
+colored = "2.0"
+clap = { version = "4.4", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.9"
+
+[[bin]]
+name = "packet-inspect"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[profile.dev]
+opt-level = 0
+debug = true
