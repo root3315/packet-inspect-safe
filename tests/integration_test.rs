@@ -44,7 +44,7 @@ fn create_test_packet(
 }
 
 fn packet_to_hex(packet: &[u8]) -> String {
-    packet.iter().map(|b| format!("{:02x}", b)).collect()
+    hex::encode(packet)
 }
 
 #[test]
@@ -531,14 +531,4 @@ fn test_icmp_display_format() {
     assert!(display.contains("ICMP Header"));
     assert!(display.contains("Echo Reply"));
     assert!(display.contains("Type:"));
-}
-
-mod hex {
-    pub fn decode(hex_str: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
-        let hex_str = hex_str.replace(" ", "").replace(":", "").replace("-", "");
-        (0..hex_str.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex_str[i..i + 2], 16))
-            .collect()
-    }
 }
