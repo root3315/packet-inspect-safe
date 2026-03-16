@@ -402,35 +402,9 @@ fn packet_to_json(packet: &Packet) -> String {
     json
 }
 
-mod hex {
-    pub fn decode(hex_str: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
-        let hex_str = hex_str.replace(" ", "").replace(":", "").replace("-", "");
-        (0..hex_str.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex_str[i..i + 2], 16))
-            .collect()
-    }
-
-    pub fn encode(data: &[u8]) -> String {
-        data.iter().map(|b| format!("{:02x}", b)).collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_hex_decode() {
-        let result = hex::decode("48656c6c6f").unwrap();
-        assert_eq!(result, b"Hello");
-    }
-
-    #[test]
-    fn test_hex_encode() {
-        let result = hex::encode(b"Hello");
-        assert_eq!(result, "48656c6c6f");
-    }
 
     #[test]
     fn test_generate_sample_packet() {
